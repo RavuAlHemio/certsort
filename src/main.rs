@@ -136,7 +136,6 @@ impl RawDerCert {
 fn ordered_intermediate_subjects(
     subject_to_issuer: &HashMap<RawX509Name, RawX509Name>,
     anchor_subject: &RawX509Name,
-    anchor_is_leaf: bool,
     deep_first: bool,
 ) -> Vec<RawX509Name> {
     let anchor_issuer = match subject_to_issuer.get(anchor_subject) {
@@ -149,7 +148,7 @@ fn ordered_intermediate_subjects(
 
     let mut ret = Vec::new();
 
-    if !anchor_is_leaf && deep_first {
+    if deep_first {
         ret.push(anchor_issuer.clone());
     }
 
@@ -157,12 +156,11 @@ fn ordered_intermediate_subjects(
     let mut sub_vec = ordered_intermediate_subjects(
         subject_to_issuer,
         &anchor_issuer,
-        false,
         deep_first,
     );
     ret.append(&mut sub_vec);
 
-    if !anchor_is_leaf && !deep_first {
+    if !deep_first {
         ret.push(anchor_issuer.clone());
     }
 
@@ -316,7 +314,6 @@ fn main() {
                     let ois = ordered_intermediate_subjects(
                         &subject_to_issuer,
                         leaf_subject,
-                        true,
                         false,
                     );
                     for imed_subject in &ois {
@@ -339,9 +336,12 @@ fn main() {
                         &subject_to_issuer,
                         leaf_subject,
                         true,
-                        true,
                     );
                     for imed_subject in &ois {
+                        if root_subjects.contains(imed_subject) {
+                            // only intermediates, not roots
+                            continue;
+                        }
                         let cert = subject_to_cert.get(imed_subject).unwrap();
                         if opts.debug {
                             println!();
