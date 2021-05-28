@@ -67,7 +67,8 @@ struct Opts {
     files: Vec<OsString>,
 
     #[clap(
-        short = 'O', long = "--order", value_delimiter = ",", default_values = &["host", "imedtoroot", "key", "other"],
+        short = 'O', long = "--order", value_delimiter = ",", require_delimiter = true,
+        default_values = &["host", "imedtoroot", "key", "other"],
         about = "The order in which to output the data. Takes a comma-separated string consisting of the values:
 
 * \"host\" (the host certificate)
