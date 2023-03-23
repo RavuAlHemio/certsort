@@ -3,12 +3,14 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
-use std::process;
+use std::process::ExitCode;
 use std::str::FromStr;
 
-use clap::Clap;
+use clap::Parser;
 use pem::Pem;
-use x509_parser::{certificate::X509Certificate, x509::X509Name};
+use x509_parser::certificate::X509Certificate;
+use x509_parser::prelude::FromDer;
+use x509_parser::x509::X509Name;
 
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
@@ -58,18 +60,18 @@ impl FromStr for Output {
 }
 
 
-#[derive(Clone, Clap, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Parser, PartialEq)]
 struct Opts {
-    #[clap(
+    #[arg(
         required = true,
-        about = "The names of the files from which to read the certificates and related data.",
+        help = "The names of the files from which to read the certificates and related data.",
     )]
     files: Vec<OsString>,
 
-    #[clap(
-        short = 'O', long = "--order", value_delimiter = ",", require_delimiter = true,
+    #[arg(
+        short = 'O', long = "order", value_delimiter = ',',
         default_values = &["host", "imedtoroot", "key", "other"],
-        about = "The order in which to output the data. Takes a comma-separated string consisting of the values:
+        help = "The order in which to output the data. Takes a comma-separated string consisting of the values:
 
 * \"host\" (the host certificate)
 * \"imedtoroot\" (intermediate certificates, ordered by decreasing distance toward the root)
@@ -80,9 +82,9 @@ struct Opts {
     )]
     order: Vec<Output>,
 
-    #[clap(
-        short = 'd', long = "--debug",
-        about = "Prefix every PEM structure with human-readable information about its content."
+    #[arg(
+        short = 'd', long = "debug",
+        help = "Prefix every PEM structure with human-readable information about its content."
     )]
     debug: bool,
 }
@@ -121,10 +123,10 @@ impl RawDerCert {
         RawDerCert::new(Vec::from(bytes))
     }
     pub fn as_pem(&self) -> Pem {
-        Pem {
-            tag: String::from("CERTIFICATE"),
-            contents: self.cert_bytes.clone(),
-        }
+        Pem::new(
+            String::from("CERTIFICATE"),
+            self.cert_bytes.clone(),
+        )
     }
     pub fn as_x509_cert(&self) -> X509Certificate {
         let (_rest, cert) = X509Certificate::from_der(&self.cert_bytes)
@@ -169,7 +171,7 @@ fn ordered_intermediate_subjects(
 }
 
 
-fn main() {
+fn main() -> ExitCode {
     let opts = Opts::parse();
 
     // read in all the certificates/PEM structures
@@ -181,18 +183,24 @@ fn main() {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("failed to read {:?}: {}", path, e);
-                process::exit(1)
+                return ExitCode::FAILURE;
             },
         };
 
         let mut something_loaded = false;
 
         // PEM?
-        let pems = pem::parse_many(&bytes);
+        let pems = match pem::parse_many(&bytes) {
+            Ok(ps) => ps,
+            Err(e) => {
+                eprintln!("failed to parse PEM file {:?}: {}", path, e);
+                continue;
+            },
+        };
         for pem in pems {
             something_loaded = true;
-            if pem.tag == "CERTIFICATE" {
-                let (_rest, cert) = match X509Certificate::from_der(&pem.contents) {
+            if pem.tag() == "CERTIFICATE" {
+                let (_rest, cert) = match X509Certificate::from_der(pem.contents()) {
                     Ok(rc) => rc,
                     Err(e) => {
                         eprintln!("failed to load PEM-encoded certificate data in {:?}: {}", path, e);
@@ -201,12 +209,12 @@ fn main() {
                 };
 
                 let raw_subject = RawX509Name::from_x509_name(cert.subject());
-                let raw_cert = RawDerCert::from_bytes(&pem.contents);
+                let raw_cert = RawDerCert::from_bytes(pem.contents());
                 if let Some(fallout) = subject_to_cert.insert(raw_subject, raw_cert) {
                     let fallout_cert = fallout.as_x509_cert();
                     eprintln!("multiple certificates found for subject: {}", fallout_cert.subject());
                 }
-            } else if pem.tag.contains("PRIVATE KEY") {
+            } else if pem.tag().contains("PRIVATE KEY") {
                 keys.push(pem)
             } else {
                 others.push(pem)
@@ -369,4 +377,5 @@ fn main() {
             },
         }
     }
+    ExitCode::SUCCESS
 }
