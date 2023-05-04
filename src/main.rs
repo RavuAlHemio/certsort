@@ -83,6 +83,12 @@ struct Opts {
     order: Vec<Output>,
 
     #[arg(
+        short = 'r', long = "orphan-imed-as-root",
+        help = "Consider intermediate certificates whose issuer's certificate has not been supplied to certsort as root certificates, not intermediate certificates."
+    )]
+    orphan_imed_as_root: bool,
+
+    #[arg(
         short = 'd', long = "debug",
         help = "Prefix every PEM structure with human-readable information about its content."
     )]
@@ -261,9 +267,8 @@ fn main() -> ExitCode {
         if raw_issuer == *raw_subject {
             // if the issuer and the subject are the same, it is a root certificate
             root_subjects.insert(raw_subject.clone());
-        } else if !subject_to_cert.contains_key(&raw_issuer) {
-            // for the sake of simplicity, if we don't have the issuer's certificate,
-            // consider it a root certificate as well
+        } else if opts.orphan_imed_as_root && !subject_to_cert.contains_key(&raw_issuer) {
+            // if we don't have the issuer's certificate, consider this a root certificate as well
             root_subjects.insert(raw_subject.clone());
         } else {
             subject_to_issuer.insert(raw_subject.clone(), raw_issuer.clone());
@@ -351,14 +356,23 @@ fn main() -> ExitCode {
                             // only intermediates, not roots
                             continue;
                         }
-                        let cert = subject_to_cert.get(imed_subject).unwrap();
-                        if opts.debug {
-                            println!();
-                            println!(">>> intermediate certificate: {}", imed_subject.as_x509_name());
-                            println!(">>>                issued by: {}", cert.as_x509_cert().issuer());
+                        match subject_to_cert.get(imed_subject) {
+                            Some(cert) => {
+                                if opts.debug {
+                                    println!();
+                                    println!(">>> intermediate certificate: {}", imed_subject.as_x509_name());
+                                    println!(">>>                issued by: {}", cert.as_x509_cert().issuer());
+                                }
+                                let pkv = cert.as_pem();
+                                print!("{}", pem::encode(&pkv));
+                            },
+                            None => {
+                                if opts.debug {
+                                    println!(">>> issuer certificate not found");
+                                }
+                                break;
+                            },
                         }
-                        let pkv = cert.as_pem();
-                        print!("{}", pem::encode(&pkv));
                     }
                 }
             },
